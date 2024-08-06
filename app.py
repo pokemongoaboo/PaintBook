@@ -16,7 +16,7 @@ def generate_plot_points(character, theme):
             {"role": "system", "content": "你是一個創意的故事策劃者。請直接列出5個完整的轉折點，每個轉折點應該是一個完整的句子。"},
             {"role": "user", "content": f"為一個關於{character}的{theme}故事生成5個可能的轉折點。確保每個轉折點都是完整的想法。"}
         ],
-        max_tokens=300,  # 增加 token 數以確保完整輸出
+        max_tokens=300,
         n=1,
         temperature=0.7,
     )
@@ -52,6 +52,13 @@ def generate_pages(story, pages, character, theme, plot_point):
     在這之前應該要讓{character}的{theme}世界發展故事更多元化:
 
     {story}
+
+    請確保每頁的格式如下：
+    Page X:
+    text: [頁面文字]
+    image_prompt: [圖像提示]
+
+    不要包含任何其他格式或說明。
     """
     response = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -140,7 +147,7 @@ def main():
     # 選擇頁數
     st.session_state.pages = st.slider("選擇繪本頁數", 6, 12, st.session_state.pages)
 
-    if st.button("生成故事轉折點") or st.session_state.plot_points is None:
+    if st.button("生成故事轉折點"):
         with st.spinner("正在生成故事轉折點..."):
             st.session_state.plot_points = generate_plot_points(st.session_state.character, st.session_state.theme)
         
@@ -177,24 +184,43 @@ def main():
 
             # 生成並顯示第一張圖片
             with st.spinner("正在生成第一頁預覽圖..."):
-                first_page = pages_content.split("\n")[0]
-                image_prompt = first_page.split("image_prompt: ")[1]
-                image_url = image_generation(image_prompt, style_base)
-                if image_url:
-                    st.image(image_url, caption="第一頁預覽")
-
-            if st.button("生成完整繪本"):
-                for i, page in enumerate(pages_content.split("\n")):
-                    if page.strip():
-                        text = page.split("text: ")[1].split(" image_prompt:")[0]
-                        image_prompt = page.split("image_prompt: ")[1]
-                        st.write(f"第 {i+1} 頁")
-                        st.write(text)
-                        with st.spinner(f"正在生成第 {i+1} 頁插圖..."):
+                pages = pages_content.split("Page ")
+                if len(pages) > 1:
+                    first_page = pages[1]  # 第一頁應該是索引1，因為索引0是空字符串
+                    text_parts = first_page.split("text: ")
+                    if len(text_parts) > 1:
+                        image_prompt_parts = text_parts[1].split("image_prompt: ")
+                        if len(image_prompt_parts) > 1:
+                            image_prompt = image_prompt_parts[1].strip()
                             image_url = image_generation(image_prompt, style_base)
                             if image_url:
-                                st.image(image_url, caption=f"第 {i+1} 頁插圖")
-                        time.sleep(5)  # 添加延遲以避免超過 API 速率限制
+                                st.image(image_url, caption="第一頁預覽")
+                        else:
+                            st.error("無法找到圖像提示。請檢查生成的內容格式。")
+                    else:
+                        st.error("無法找到頁面文字。請檢查生成的內容格式。")
+                else:
+                    st.error("無法找到頁面內容。請檢查生成的內容格式。")
+
+            if st.button("生成完整繪本"):
+                for i, page in enumerate(pages_content.split("Page ")[1:], 1):  # 跳過第一個空元素
+                    parts = page.split("text: ")
+                    if len(parts) > 1:
+                        text_and_prompt = parts[1].split("image_prompt: ")
+                        if len(text_and_prompt) > 1:
+                            text = text_and_prompt[0].strip()
+                            image_prompt = text_and_prompt[1].strip()
+                            st.write(f"第 {i} 頁")
+                            st.write(text)
+                            with st.spinner(f"正在生成第 {i} 頁插圖..."):
+                                image_url = image_generation(image_prompt, style_base)
+                                if image_url:
+                                    st.image(image_url, caption=f"第 {i} 頁插圖")
+                            time.sleep(5)  # 添加延遲以避免超過 API 速率限制
+                        else:
+                            st.error(f"第 {i} 頁: 無法找到圖像提示。請檢查生成的內容格式。")
+                    else:
+                        st.error(f"第 {i} 頁: 無法找到頁面文字。請檢查生成的內容格式。")
         else:
             st.warning("請先選擇或輸入一個故事轉折點。")
 
