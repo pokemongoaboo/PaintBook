@@ -1,6 +1,7 @@
 import streamlit as st
 from openai import OpenAI
 import time
+import re
 
 # 初始化 OpenAI 客戶端
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -13,14 +14,19 @@ def generate_plot_points(character, theme):
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "你是一個創意的故事策劃者。"},
-            {"role": "user", "content": f"為一個關於{character}的{theme}故事生成3-5個可能的轉折點:"}
+            {"role": "system", "content": "你是一個創意的故事策劃者。請直接列出轉折點，不要加入其他說明文字。"},
+            {"role": "user", "content": f"為一個關於{character}的{theme}故事生成3-5個可能的轉折點。每個轉折點都應該簡短且具體。"}
         ],
         max_tokens=150,
         n=1,
         temperature=0.7,
     )
-    plot_points = response.choices[0].message.content.strip().split("\n")
+    content = response.choices[0].message.content.strip()
+    # 使用正則表達式來提取數字列表項
+    plot_points = re.findall(r'\d+\.\s*(.*?)(?=\n\d+\.|\Z)', content, re.DOTALL)
+    # 如果沒有找到數字列表，就按換行符分割
+    if not plot_points:
+        plot_points = content.split('\n')
     return [point.strip() for point in plot_points if point.strip()]
 
 def generate_story(character, theme, plot_point, pages):
@@ -128,9 +134,23 @@ def main():
     if st.button("生成故事轉折點"):
         with st.spinner("正在生成故事轉折點..."):
             plot_points = generate_plot_points(character, theme)
-        selected_plot_point = st.selectbox("選擇故事轉折點", plot_points + ["自定義"])
-        if selected_plot_point == "自定義":
-            selected_plot_point = st.text_input("輸入自定義故事轉折點")
+        
+        if plot_points:
+            st.write("生成的故事轉折點：")
+            for i, point in enumerate(plot_points, 1):
+                st.write(f"{i}. {point}")
+            
+            selected_plot_point = st.selectbox(
+                "選擇故事轉折點",
+                options=plot_points + ["自定義"],
+                format_func=lambda x: x if x != "自定義" else "自定義轉折點"
+            )
+            
+            if selected_plot_point == "自定義":
+                selected_plot_point = st.text_input("輸入自定義故事轉折點")
+        else:
+            st.error("無法生成故事轉折點，請重試。")
+            return
 
         if st.button("生成繪本"):
             with st.spinner("正在生成故事..."):
