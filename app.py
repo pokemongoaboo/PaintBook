@@ -3,10 +3,10 @@ from openai import OpenAI
 import time
 import re
 
-# 初始化 OpenAI 客户端
+# 初始化 OpenAI 客戶端
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# 定义主角和主题选项
+# 定義主角和主題選項
 CHARACTER_OPTIONS = ["貓咪", "狗狗", "花花", "小鳥", "小石頭"]
 THEME_OPTIONS = ["親情", "友情", "冒險", "度假", "運動比賽"]
 
@@ -118,6 +118,81 @@ def image_generation(image_prompt, style_base):
         st.error(f"生成圖片時發生錯誤: {str(e)}")
         return None
 
+def generate_preview_image():
+    with st.spinner("正在生成第一頁預覽圖..."):
+        pages = st.session_state.pages_content.split("Page ")
+        if len(pages) > 1:
+            first_page = pages[1]  # 第一頁應該是索引1，因為索引0是空字符串
+            text_parts = first_page.split("text: ")
+            if len(text_parts) > 1:
+                image_prompt_parts = text_parts[1].split("image_prompt: ")
+                if len(image_prompt_parts) > 1:
+                    image_prompt = image_prompt_parts[1].strip()
+                    image_url = image_generation(image_prompt, st.session_state.style_base)
+                    if image_url:
+                        st.image(image_url, caption="第一頁預覽")
+                        if st.button("重新生成預覽圖"):
+                            generate_preview_image()
+                    else:
+                        st.error("生成預覽圖失敗。請稍後再試。")
+                else:
+                    st.error("無法找到圖像提示。請檢查生成的內容格式。")
+            else:
+                st.error("無法找到頁面文字。請檢查生成的內容格式。")
+        else:
+            st.error("無法找到頁面內容。請檢查生成的內容格式。")
+
+def display_generated_page(page_number):
+    st.subheader(f"第 {page_number} 頁")
+    st.write(st.session_state.full_storybook[page_number-1]['text'])
+    st.image(st.session_state.full_storybook[page_number-1]['image'], caption=f"第 {page_number} 頁插圖")
+
+def generate_new_page(page_number, page_content):
+    parts = page_content.split("text: ")
+    if len(parts) > 1:
+        text_and_prompt = parts[1].split("image_prompt: ")
+        if len(text_and_prompt) > 1:
+            text = text_and_prompt[0].strip()
+            image_prompt = text_and_prompt[1].strip()
+            st.subheader(f"第 {page_number} 頁")
+            st.write(text)
+            with st.spinner(f"正在生成第 {page_number} 頁插圖..."):
+                image_url = image_generation(image_prompt, st.session_state.style_base)
+                if image_url:
+                    st.image(image_url, caption=f"第 {page_number} 頁插圖")
+                    # 保存生成的頁面內容
+                    st.session_state.full_storybook.append({
+                        'text': text,
+                        'image': image_url
+                    })
+                else:
+                    st.error(f"第 {page_number} 頁: 生成圖片失敗。請稍後再試。")
+            time.sleep(5)  # 添加延遲以避免超過 API 速率限制
+        else:
+            st.error(f"第 {page_number} 頁: 無法找到圖像提示。請檢查生成的內容格式。")
+    else:
+        st.error(f"第 {page_number} 頁: 無法找到頁面文字。請檢查生成的內容格式。")
+
+def generate_full_storybook():
+    pages = st.session_state.pages_content.split("Page ")[1:]  # 跳過第一個空元素
+    total_pages = len(pages)
+
+    # 創建一個進度條
+    progress_bar = st.progress(0)
+
+    for i, page in enumerate(pages, 1):
+        if i <= len(st.session_state.full_storybook):
+            # 如果這一頁已經生成過，直接顯示
+            display_generated_page(i)
+        else:
+            # 如果這一頁還沒有生成，生成新的內容
+            generate_new_page(i, page)
+
+        # 更新進度條
+        progress_bar.progress(i / total_pages)
+
+    st.success("完整繪本生成完成！")
+
 def main():
     st.title("互動式繪本生成器")
 
@@ -138,22 +213,22 @@ def main():
         st.session_state.pages_content = None
     if 'style_base' not in st.session_state:
         st.session_state.style_base = None
-    if 'generated_pages' not in st.session_state:
-        st.session_state.generated_pages = []
+    if 'full_storybook' not in st.session_state:
+        st.session_state.full_storybook = []
 
-    # 选择或输入绘本主角
+    # 選擇或輸入繪本主角
     character = st.selectbox("選擇繪本主角", CHARACTER_OPTIONS + ["自定義"], key='character_select')
     if character == "自定義":
         character = st.text_input("輸入自定義主角", key='character_input')
     st.session_state.character = character
 
-    # 选择或输入绘本主题
+    # 選擇或輸入繪本主題
     theme = st.selectbox("選擇繪本主題", THEME_OPTIONS + ["自定義"], key='theme_select')
     if theme == "自定義":
         theme = st.text_input("輸入自定義主題", key='theme_input')
     st.session_state.theme = theme
 
-    # 选择页数
+    # 選擇頁數
     st.session_state.pages = st.slider("選擇繪本頁數", 6, 12, st.session_state.pages)
 
     if st.button("生成故事轉折點"):
@@ -191,7 +266,7 @@ def main():
                 st.write("風格基礎：")
                 st.write(st.session_state.style_base)
 
-            # 生成并显示第一张图片
+            # 生成並顯示第一張圖片
             generate_preview_image()
 
             if st.button("重新生成繪本劇情"):
@@ -199,68 +274,13 @@ def main():
                     st.session_state.story = generate_story(st.session_state.character, st.session_state.theme, st.session_state.selected_plot_point, st.session_state.pages)
                     st.session_state.pages_content = generate_pages(st.session_state.story, st.session_state.pages, st.session_state.character, st.session_state.theme, st.session_state.selected_plot_point)
                     st.session_state.style_base = generate_style_base(st.session_state.story)
-                    st.session_state.generated_pages = []  # 重置已生成的页面
+                    st.session_state.full_storybook = []  # 重置已生成的完整繪本
                     st.experimental_rerun()
 
             if st.button("生成完整繪本"):
                 generate_full_storybook()
         else:
             st.warning("請先選擇或輸入一個故事轉折點。")
-
-def generate_preview_image():
-    with st.spinner("正在生成第一頁預覽圖..."):
-        pages = st.session_state.pages_content.split("Page ")
-        if len(pages) > 1:
-            first_page = pages[1]  # 第一页应该是索引1，因为索引0是空字符串
-            text_parts = first_page.split("text: ")
-            if len(text_parts) > 1:
-                image_prompt_parts = text_parts[1].split("image_prompt: ")
-                if len(image_prompt_parts) > 1:
-                    image_prompt = image_prompt_parts[1].strip()
-                    image_url = image_generation(image_prompt, st.session_state.style_base)
-                    if image_url:
-                        st.image(image_url, caption="第一頁預覽")
-                        if st.button("重新生成預覽圖"):
-                            generate_preview_image()
-                else:
-                    st.error("無法找到圖像提示。請檢查生成的內容格式。")
-            else:
-                st.error("無法找到頁面文字。請檢查生成的內容格式。")
-        else:
-            st.error("無法找到頁面內容。請檢查生成的內容格式。")
-
-def generate_full_storybook():
-    pages = st.session_state.pages_content.split("Page ")[1:]  # 跳过第一个空元素
-    for i, page in enumerate(pages, 1):
-        if i <= len(st.session_state.generated_pages):
-            # 如果这一页已经生成过，直接显示
-            st.write(f"第 {i} 頁")
-            st.write(st.session_state.generated_pages[i-1]['text'])
-            st.image(st.session_state.generated_pages[i-1]['image'], caption=f"第 {i} 頁插圖")
-        else:
-            # 如果这一页还没有生成，生成新的内容
-            parts = page.split("text: ")
-            if len(parts) > 1:
-                text_and_prompt = parts[1].split("image_prompt: ")
-                if len(text_and_prompt) > 1:
-                    text = text_and_prompt[0].strip()
-                    image_prompt = text_and_prompt[1].strip()
-                    st.write(f"第 {i} 頁")
-                    st.write(text)
-                    with st.spinner(f"正在生成第 {i} 頁插圖..."):
-                        image_url = image_generation(image_prompt, st.session_state.style_base)
-                        if image_url:
-                            st.image(image_url, caption=f"第 {i} 頁插圖")
-                            # 保存生成的页面内容
-                            st.session_state.generated_pages.append({
-                                'text': text,
-                                'image': image_url
-                            })
-                    time.sleep(5)  # 添加延迟以避免超过 API 速率限制
-                else:
-                    st.error(f"第 {i} 頁: 無法找到圖像提示。請檢查生成的內容格式。")
-            else:
-                st.error(f"第 {i} 頁: 無法找到頁面文字。請檢查生成的內容格式。")
 
 if __name__ == "__main__":
     main()
