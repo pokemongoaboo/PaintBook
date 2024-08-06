@@ -1,12 +1,11 @@
 import streamlit as st
 from openai import OpenAI
 import time
-import re
 
-# 初始化 OpenAI 客戶端
+# Initialize OpenAI client
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# 定義主角和主題選項
+# Define character and theme options
 CHARACTER_OPTIONS = ["貓咪", "狗狗", "花花", "小鳥", "小石頭"]
 THEME_OPTIONS = ["親情", "友情", "冒險", "度假", "運動比賽"]
 
@@ -14,8 +13,8 @@ def generate_plot_points(character, theme):
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "你是一個創意的故事策劃者。請直接列出5個完整的轉折點，每個轉折點應該是一個完整的句子。不要添加編號。"},
-            {"role": "user", "content": f"為一個關於{character}的{theme}故事生成5個可能的轉折點。確保每個轉折點都是完整的想法。"}
+            {"role": "system", "content": "你是一個創意的故事策劃者。請直接列出3到5個完整的轉折點，每個轉折點應該是一個完整的句子。不要添加編號。"},
+            {"role": "user", "content": f"為一個關於{character}的{theme}故事生成3到5個可能的轉折點。確保每個轉折點都是完整的想法。"}
         ],
         max_tokens=300,
         n=1,
@@ -101,6 +100,7 @@ def image_generation(image_prompt, style_base):
     - Apply at least 3 effect words (lighting effects, color tones, rendering effects, visual style)
     - Use 1 or more composition techniques for visual interest
     - Do not include any text in the image
+    - Set a random seed value of 42
     """
     
     try:
@@ -122,7 +122,7 @@ def generate_preview_image():
     with st.spinner("正在生成第一頁預覽圖..."):
         pages = st.session_state.pages_content.split("Page ")
         if len(pages) > 1:
-            first_page = pages[1]  # 第一頁應該是索引1，因為索引0是空字符串
+            first_page = pages[1]
             text_parts = first_page.split("text: ")
             if len(text_parts) > 1:
                 image_prompt_parts = text_parts[1].split("image_prompt: ")
@@ -142,37 +142,6 @@ def generate_preview_image():
         else:
             st.error("無法找到頁面內容。請檢查生成的內容格式。")
 
-def display_generated_page(page_number):
-    st.subheader(f"第 {page_number} 頁")
-    st.write(st.session_state.full_storybook[page_number-1]['text'])
-    st.image(st.session_state.full_storybook[page_number-1]['image'], caption=f"第 {page_number} 頁插圖")
-
-def generate_new_page(page_number, page_content):
-    parts = page_content.split("text: ")
-    if len(parts) > 1:
-        text_and_prompt = parts[1].split("image_prompt: ")
-        if len(text_and_prompt) > 1:
-            text = text_and_prompt[0].strip()
-            image_prompt = text_and_prompt[1].strip()
-            st.subheader(f"第 {page_number} 頁")
-            st.write(text)
-            with st.spinner(f"正在生成第 {page_number} 頁插圖..."):
-                image_url = image_generation(image_prompt, st.session_state.style_base)
-                if image_url:
-                    st.image(image_url, caption=f"第 {page_number} 頁插圖")
-                    # 保存生成的頁面內容
-                    st.session_state.full_storybook.append({
-                        'text': text,
-                        'image': image_url
-                    })
-                else:
-                    st.error(f"第 {page_number} 頁: 生成圖片失敗。請稍後再試。")
-            time.sleep(5)  # 添加延遲以避免超過 API 速率限制
-        else:
-            st.error(f"第 {page_number} 頁: 無法找到圖像提示。請檢查生成的內容格式。")
-    else:
-        st.error(f"第 {page_number} 頁: 無法找到頁面文字。請檢查生成的內容格式。")
-
 def generate_full_storybook():
     pages = st.session_state.pages_content.split("Page ")[1:]  # 跳過第一個空元素
     total_pages = len(pages)
@@ -181,12 +150,25 @@ def generate_full_storybook():
     progress_bar = st.progress(0)
 
     for i, page in enumerate(pages, 1):
-        if i <= len(st.session_state.full_storybook):
-            # 如果這一頁已經生成過，直接顯示
-            display_generated_page(i)
+        parts = page.split("text: ")
+        if len(parts) > 1:
+            text_and_prompt = parts[1].split("image_prompt: ")
+            if len(text_and_prompt) > 1:
+                text = text_and_prompt[0].strip()
+                image_prompt = text_and_prompt[1].strip()
+                st.subheader(f"第 {i} 頁")
+                st.write(text)
+                with st.spinner(f"正在生成第 {i} 頁插圖..."):
+                    image_url = image_generation(image_prompt, st.session_state.style_base)
+                    if image_url:
+                        st.image(image_url, caption=f"第 {i} 頁插圖")
+                    else:
+                        st.error(f"第 {i} 頁: 生成圖片失敗。請稍後再試。")
+                time.sleep(5)  # 添加延遲以避免超過 API 速率限制
+            else:
+                st.error(f"第 {i} 頁: 無法找到圖像提示。請檢查生成的內容格式。")
         else:
-            # 如果這一頁還沒有生成，生成新的內容
-            generate_new_page(i, page)
+            st.error(f"第 {i} 頁: 無法找到頁面文字。請檢查生成的內容格式。")
 
         # 更新進度條
         progress_bar.progress(i / total_pages)
@@ -213,8 +195,6 @@ def main():
         st.session_state.pages_content = None
     if 'style_base' not in st.session_state:
         st.session_state.style_base = None
-    if 'full_storybook' not in st.session_state:
-        st.session_state.full_storybook = []
 
     # 選擇或輸入繪本主角
     character = st.selectbox("選擇繪本主角", CHARACTER_OPTIONS + ["自定義"], key='character_select')
@@ -274,7 +254,6 @@ def main():
                     st.session_state.story = generate_story(st.session_state.character, st.session_state.theme, st.session_state.selected_plot_point, st.session_state.pages)
                     st.session_state.pages_content = generate_pages(st.session_state.story, st.session_state.pages, st.session_state.character, st.session_state.theme, st.session_state.selected_plot_point)
                     st.session_state.style_base = generate_style_base(st.session_state.story)
-                    st.session_state.full_storybook = []  # 重置已生成的完整繪本
                     st.experimental_rerun()
 
             if st.button("生成完整繪本"):
