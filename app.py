@@ -1,191 +1,185 @@
 import streamlit as st
-from openai import OpenAI
+import openai
 import time
+import requests
+from io import BytesIO
+from PIL import Image
 import re
+import logging
 
-# 初始化 OpenAI 客戶端
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# 設置日誌
+logging.basicConfig(level=logging.INFO)
 
-# 定義主角和主題選項
-CHARACTER_OPTIONS = ["貓咪", "狗狗", "花花", "小鳥", "小石頭"]
-THEME_OPTIONS = ["親情", "友情", "冒險", "度假", "運動比賽"]
+# 設置 OpenAI API 密鑰
+openai.api_key = st.secrets["OPENAI_API_KEY"]
+
+# 初始化 session_state
+if 'story' not in st.session_state:
+    st.session_state.story = None
+if 'image_prompts' not in st.session_state:
+    st.session_state.image_prompts = None
+if 'first_image' not in st.session_state:
+    st.session_state.first_image = None
+if 'stage' not in st.session_state:
+    st.session_state.stage = 'input'
+if 'pages' not in st.session_state:
+    st.session_state.pages = 6
 
 def generate_plot_points(character, theme):
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "你是一個創意的故事策劃者。請直接列出轉折點，不要加入其他說明文字。"},
-            {"role": "user", "content": f"為一個關於{character}的{theme}故事生成3-5個可能的轉折點。每個轉折點都應該簡短且具體。"}
-        ],
-        max_tokens=150,
-        n=1,
-        temperature=0.7,
-    )
-    content = response.choices[0].message.content.strip()
-    # 使用正則表達式來提取數字列表項
-    plot_points = re.findall(r'\d+\.\s*(.*?)(?=\n\d+\.|\Z)', content, re.DOTALL)
-    # 如果沒有找到數字列表，就按換行符分割
-    if not plot_points:
-        plot_points = content.split('\n')
-    return [point.strip() for point in plot_points if point.strip()]
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "你是一個創意十足的兒童故事作家。請確保所有內容都適合兒童。"},
+                {"role": "user", "content": f"為一個關於{character}的{theme}故事生成5個可能的故事轉折點。請確保內容適合兒童，避免任何暴力、恐怖或不適當的元素。每點不超過15個字。"}
+            ]
+        )
+        plot_points = response.choices[0].message['content'].split('\n')
+        return [point.strip('1234567890. ') for point in plot_points if point.strip()]
+    except Exception as e:
+        logging.error(f"生成情節點時發生錯誤：{str(e)}")
+        st.error("生成情節點時發生錯誤，請稍後再試。")
+        return []
 
 def generate_story(character, theme, plot_point, pages):
-    prompt = f"""
-    請你角色扮演成一個暢銷的童書繪本作家，你擅長以孩童的純真眼光看這世界，製作出許多溫暖人心的作品。
-    請以下列主題: {theme}發想故事，
-    在{pages}的篇幅內，
-    說明一個{character}的故事，
-    並注意在倒數第三頁加入{plot_point}的元素，
-    最後的故事需要是溫馨、快樂的結局。
-    """
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "你是一個專業的兒童繪本作家。"},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=1000,
-        n=1,
-        temperature=0.7,
-    )
-    return response.choices[0].message.content.strip()
-
-def generate_pages(story, pages, character, theme, plot_point):
-    prompt = f"""
-    將以下故事大綱細分至預計{pages}個跨頁的篇幅，每頁需要包括(text, image_prompt)，
-    {pages-3}(倒數第三頁)才可以出現{plot_point}，
-    在這之前應該要讓{character}的{theme}世界發展故事更多元化:
-
-    {story}
-    """
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "你是一個專業的繪本編輯。"},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=1000,
-        n=1,
-        temperature=0.7,
-    )
-    return response.choices[0].message.content.strip()
-
-def generate_style_base(story):
-    prompt = f"""
-    基於以下故事，請思考大方向上你想要呈現的視覺效果，這是你用來統一整體繪本風格的描述，請盡量精簡，使用英文撰寫:
-
-    {story}
-    """
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "你是一個專業的視覺設計師。"},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=100,
-        n=1,
-        temperature=0.7,
-    )
-    return response.choices[0].message.content.strip()
-
-def image_generation(image_prompt, style_base):
-    final_prompt = f"""
-    Based on the image prompt: "{image_prompt}" and the style base: "{style_base}",
-    please create an image with the following characteristics:
-    - Color scheme and background details that match the story's atmosphere
-    - Specific style and scene details as described
-    - The main character should be prominently featured with the current color, shape, and features
-    - Apply at least 3 effect words (lighting effects, color tones, rendering effects, visual style)
-    - Use 1 or more composition techniques for visual interest
-    - Do not include any text in the image
-    """
-    
     try:
-        response = client.images.generate(
-            model="dall-e-3",
-            prompt=final_prompt,
-            n=1,
-            size="1792x1024",
-            quality="standard",
-            response_format="url"
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "你是一個暢銷的童書繪本作家，擅長以孩童的純真眼光看這世界，製作出許多溫馨、積極的作品。"},
+                {"role": "user", "content": f"請以'{theme}'為主題發想一個關於'{character}'的故事，在{pages}頁的篇幅內，並在倒數第三頁加入'{plot_point}'的元素。故事需要有溫馨、快樂的結局，確保內容適合兒童，避免任何暴力、恐怖或不適當的元素。請提供簡要的故事大綱。"}
+            ]
         )
-        image_url = response.data[0].url
-        return image_url
+        return response.choices[0].message['content']
     except Exception as e:
-        st.error(f"生成圖片時發生錯誤: {str(e)}")
-        return None
+        logging.error(f"生成故事時發生錯誤：{str(e)}")
+        st.error("生成故事時發生錯誤，請稍後再試。")
+        return ""
+
+def generate_image_prompts(story, pages):
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "你是一個專業的兒童繪本插畫描述師，擅長將故事轉化為生動、適合兒童的圖像描述。"},
+                {"role": "user", "content": f"基於以下故事，為{pages}頁的兒童繪本創作圖像提示。每個提示應該簡潔但富有視覺細節，包括場景、角色動作和情緒。確保所有描述都適合兒童，避免任何可能被視為不適當或危險的內容。故事：{story}"}
+            ]
+        )
+        prompts = response.choices[0].message['content'].split('\n')
+        return [prompt.strip('1234567890. ') for prompt in prompts if prompt.strip()]
+    except Exception as e:
+        logging.error(f"生成圖像提示時發生錯誤：{str(e)}")
+        st.error("生成圖像提示時發生錯誤，請稍後再試。")
+        return []
+
+def safe_prompt(prompt):
+    # 移除可能觸發安全系統的詞語
+    unsafe_words = ["naked", "nude", "blood", "gore", "violence", "weapon", "dead", "kill"]
+    for word in unsafe_words:
+        prompt = re.sub(r'\b' + word + r'\b', '', prompt, flags=re.IGNORECASE)
+    
+    # 添加安全限定詞
+    safe_prompt = f"Safe, child-friendly illustration: {prompt}. Ensure the image is suitable for young children."
+    return safe_prompt
+
+def generate_image(prompt, size="1024x1024", model="dall-e-3", max_retries=3):
+    safe_prompt_text = safe_prompt(prompt)
+    for attempt in range(max_retries):
+        try:
+            response = openai.Image.create(
+                model=model,
+                prompt=safe_prompt_text,
+                n=1,
+                size=size
+            )
+            image_url = response['data'][0]['url']
+            return Image.open(BytesIO(requests.get(image_url).content))
+        except Exception as e:
+            logging.error(f"圖像生成失敗（嘗試 {attempt + 1}/{max_retries}）：{str(e)}")
+            if attempt == max_retries - 1:
+                st.error(f"圖像生成失敗：{str(e)}")
+                return None
+            else:
+                st.warning(f"圖像生成失敗，正在重試...（第{attempt+1}次）")
+                time.sleep(2)  # 等待一段時間後重試
 
 def main():
-    st.title("互動式繪本生成器")
+    st.title("互動式兒童繪本生成器")
 
-    # 選擇或輸入繪本主角
-    character = st.selectbox("選擇繪本主角", CHARACTER_OPTIONS + ["自定義"])
-    if character == "自定義":
-        character = st.text_input("輸入自定義主角")
+    try:
+        if st.session_state.stage == 'input':
+            # 步驟1：選擇主角
+            character_options = ["小貓", "小狗", "小兔", "小鳥", "小熊"]
+            character = st.selectbox("選擇或輸入繪本主角", character_options + ["其他"])
+            if character == "其他":
+                character = st.text_input("請輸入自定義主角")
 
-    # 選擇或輸入繪本主題
-    theme = st.selectbox("選擇繪本主題", THEME_OPTIONS + ["自定義"])
-    if theme == "自定義":
-        theme = st.text_input("輸入自定義主題")
+            # 步驟2：選擇主題
+            theme_options = ["友誼", "勇氣", "幫助他人", "學習新事物", "家庭"]
+            theme = st.selectbox("選擇或輸入繪本主題", theme_options + ["其他"])
+            if theme == "其他":
+                theme = st.text_input("請輸入自定義主題")
 
-    # 選擇頁數
-    pages = st.slider("選擇繪本頁數", 6, 12, 8)
+            # 步驟3：生成並選擇故事轉折點
+            if character and theme:
+                plot_points = generate_plot_points(character, theme)
+                plot_point = st.selectbox("選擇或輸入繪本故事轉折重點", plot_points + ["其他"])
+                if plot_point == "其他":
+                    plot_point = st.text_input("請輸入自定義故事轉折重點")
 
-    if st.button("生成故事轉折點"):
-        with st.spinner("正在生成故事轉折點..."):
-            plot_points = generate_plot_points(character, theme)
-        
-        if plot_points:
-            st.write("生成的故事轉折點：")
-            for i, point in enumerate(plot_points, 1):
-                st.write(f"{i}. {point}")
-            
-            selected_plot_point = st.selectbox(
-                "選擇故事轉折點",
-                options=plot_points + ["自定義"],
-                format_func=lambda x: x if x != "自定義" else "自定義轉折點"
-            )
-            
-            if selected_plot_point == "自定義":
-                selected_plot_point = st.text_input("輸入自定義故事轉折點")
-        else:
-            st.error("無法生成故事轉折點，請重試。")
-            return
+            # 步驟4：選擇頁數
+            st.session_state.pages = st.slider("選擇繪本頁數", 6, 12, st.session_state.pages)
 
-        if st.button("生成繪本"):
-            with st.spinner("正在生成故事..."):
-                story = generate_story(character, theme, selected_plot_point, pages)
-                st.write("故事大綱：")
-                st.write(story)
+            if st.button("生成繪本"):
+                with st.spinner("正在生成繪本..."):
+                    st.session_state.story = generate_story(character, theme, plot_point, st.session_state.pages)
+                    st.session_state.image_prompts = generate_image_prompts(st.session_state.story, st.session_state.pages)
+                    st.session_state.first_image = generate_image(st.session_state.image_prompts[0], size="1024x1024", model="dall-e-3")
+                    st.session_state.stage = 'preview'
+                    st.experimental_rerun()
 
-                pages_content = generate_pages(story, pages, character, theme, selected_plot_point)
-                st.write("分頁內容：")
-                st.write(pages_content)
+        elif st.session_state.stage == 'preview':
+            st.write("故事大綱預覽：")
+            st.write(st.session_state.story)
 
-                style_base = generate_style_base(story)
-                st.write("風格基礎：")
-                st.write(style_base)
+            st.write("圖像提示預覽：")
+            for i, prompt in enumerate(st.session_state.image_prompts):
+                st.write(f"第{i+1}頁：{prompt}")
 
-            # 生成並顯示第一張圖片
-            with st.spinner("正在生成第一頁預覽圖..."):
-                first_page = pages_content.split("\n")[0]
-                image_prompt = first_page.split("image_prompt: ")[1]
-                image_url = image_generation(image_prompt, style_base)
-                if image_url:
-                    st.image(image_url, caption="第一頁預覽")
+            st.write("第一張圖片預覽：")
+            if st.session_state.first_image:
+                st.image(st.session_state.first_image)
 
-            if st.button("生成完整繪本"):
-                for i, page in enumerate(pages_content.split("\n")):
-                    if page.strip():
-                        text = page.split("text: ")[1].split(" image_prompt:")[0]
-                        image_prompt = page.split("image_prompt: ")[1]
-                        st.write(f"第 {i+1} 頁")
-                        st.write(text)
-                        with st.spinner(f"正在生成第 {i+1} 頁插圖..."):
-                            image_url = image_generation(image_prompt, style_base)
-                            if image_url:
-                                st.image(image_url, caption=f"第 {i+1} 頁插圖")
-                        time.sleep(5)  # 添加延遲以避免超過 API 速率限制
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("重新生成"):
+                    st.session_state.stage = 'input'
+                    st.experimental_rerun()
+            with col2:
+                if st.button("確認並生成完整繪本"):
+                    st.session_state.stage = 'generate'
+                    st.experimental_rerun()
+
+        elif st.session_state.stage == 'generate':
+            st.write("正在生成完整繪本...")
+            for i, prompt in enumerate(st.session_state.image_prompts):
+                st.write(f"生成第{i+1}頁...")
+                image = generate_image(prompt, size="1024x1024", model="dall-e-3")
+                if image:
+                    st.image(image)
+                time.sleep(2)  # 為了避免超過API速率限制
+
+            st.success("繪本生成完成！")
+            if st.button("重新開始"):
+                st.session_state.stage = 'input'
+                st.session_state.story = None
+                st.session_state.image_prompts = None
+                st.session_state.first_image = None
+                st.experimental_rerun()
+
+    except Exception as e:
+        logging.error(f"發生錯誤：{str(e)}")
+        st.error(f"很抱歉，發生了一個錯誤：{str(e)}")
 
 if __name__ == "__main__":
     main()
