@@ -6,8 +6,18 @@ from io import BytesIO
 from PIL import Image
 import re
 
-# 設置OpenAI API密鑰
+# 設置 OpenAI API 密鑰
 openai.api_key = st.secrets["OPENAI_API_KEY"]
+
+# 初始化 session_state
+if 'story' not in st.session_state:
+    st.session_state.story = None
+if 'image_prompts' not in st.session_state:
+    st.session_state.image_prompts = None
+if 'first_image' not in st.session_state:
+    st.session_state.first_image = None
+if 'stage' not in st.session_state:
+    st.session_state.stage = 'input'
 
 def generate_plot_points(character, theme):
     response = openai.ChatCompletion.create(
@@ -74,57 +84,75 @@ def generate_image(prompt, size="1024x1024", model="dall-e-3", max_retries=3):
 def main():
     st.title("互動式兒童繪本生成器")
 
-    # 步驟1：選擇主角
-    character_options = ["小貓", "小狗", "小兔", "小鳥", "小熊"]
-    character = st.selectbox("選擇或輸入繪本主角", character_options + ["其他"])
-    if character == "其他":
-        character = st.text_input("請輸入自定義主角")
+    if st.session_state.stage == 'input':
+        # 步驟1：選擇主角
+        character_options = ["小貓", "小狗", "小兔", "小鳥", "小熊"]
+        character = st.selectbox("選擇或輸入繪本主角", character_options + ["其他"])
+        if character == "其他":
+            character = st.text_input("請輸入自定義主角")
 
-    # 步驟2：選擇主題
-    theme_options = ["友誼", "勇氣", "幫助他人", "學習新事物", "家庭"]
-    theme = st.selectbox("選擇或輸入繪本主題", theme_options + ["其他"])
-    if theme == "其他":
-        theme = st.text_input("請輸入自定義主題")
+        # 步驟2：選擇主題
+        theme_options = ["友誼", "勇氣", "幫助他人", "學習新事物", "家庭"]
+        theme = st.selectbox("選擇或輸入繪本主題", theme_options + ["其他"])
+        if theme == "其他":
+            theme = st.text_input("請輸入自定義主題")
 
-    # 步驟3：生成並選擇故事轉折點
-    if character and theme:
-        plot_points = generate_plot_points(character, theme)
-        plot_point = st.selectbox("選擇或輸入繪本故事轉折重點", plot_points + ["其他"])
-        if plot_point == "其他":
-            plot_point = st.text_input("請輸入自定義故事轉折重點")
+        # 步驟3：生成並選擇故事轉折點
+        if character and theme:
+            plot_points = generate_plot_points(character, theme)
+            plot_point = st.selectbox("選擇或輸入繪本故事轉折重點", plot_points + ["其他"])
+            if plot_point == "其他":
+                plot_point = st.text_input("請輸入自定義故事轉折重點")
 
-    # 步驟4：選擇頁數
-    pages = st.slider("選擇繪本頁數", 6, 12)
+        # 步驟4：選擇頁數
+        pages = st.slider("選擇繪本頁數", 6, 12)
 
-    if st.button("生成繪本"):
-        with st.spinner("正在生成繪本..."):
-            story = generate_story(character, theme, plot_point, pages)
-            st.write("故事大綱預覽：")
-            st.write(story)
+        if st.button("生成繪本"):
+            with st.spinner("正在生成繪本..."):
+                st.session_state.story = generate_story(character, theme, plot_point, pages)
+                st.session_state.image_prompts = generate_image_prompts(st.session_state.story, pages)
+                st.session_state.first_image = generate_image(st.session_state.image_prompts[0], size="1024x1024", model="dall-e-3")
+                st.session_state.stage = 'preview'
+                st.experimental_rerun()
 
-            image_prompts = generate_image_prompts(story, pages)
-            st.write("圖像提示預覽：")
-            for i, prompt in enumerate(image_prompts):
-                st.write(f"第{i+1}頁：{prompt}")
+    elif st.session_state.stage == 'preview':
+        st.write("故事大綱預覽：")
+        st.write(st.session_state.story)
 
-            st.write("生成第一張圖片預覽：")
-            first_image = generate_image(image_prompts[0], size="1024x1024", model="dall-e-3")
-            if first_image:
-                st.image(first_image)
+        st.write("圖像提示預覽：")
+        for i, prompt in enumerate(st.session_state.image_prompts):
+            st.write(f"第{i+1}頁：{prompt}")
 
-        if st.button("重新生成"):
+        st.write("第一張圖片預覽：")
+        if st.session_state.first_image:
+            st.image(st.session_state.first_image)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("重新生成"):
+                st.session_state.stage = 'input'
+                st.experimental_rerun()
+        with col2:
+            if st.button("確認並生成完整繪本"):
+                st.session_state.stage = 'generate'
+                st.experimental_rerun()
+
+    elif st.session_state.stage == 'generate':
+        st.write("正在生成完整繪本...")
+        for i, prompt in enumerate(st.session_state.image_prompts):
+            st.write(f"生成第{i+1}頁...")
+            image = generate_image(prompt, size="1024x1024", model="dall-e-3")
+            if image:
+                st.image(image)
+            time.sleep(2)  # 為了避免超過API速率限制
+
+        st.success("繪本生成完成！")
+        if st.button("重新開始"):
+            st.session_state.stage = 'input'
+            st.session_state.story = None
+            st.session_state.image_prompts = None
+            st.session_state.first_image = None
             st.experimental_rerun()
-
-        if st.button("確認並生成完整繪本"):
-            with st.spinner("正在生成完整繪本..."):
-                for i, prompt in enumerate(image_prompts):
-                    st.write(f"生成第{i+1}頁...")
-                    image = generate_image(prompt, size="1024x1024", model="dall-e-3")
-                    if image:
-                        st.image(image)
-                    time.sleep(2)  # 為了避免超過API速率限制
-
-            st.success("繪本生成完成！")
 
 if __name__ == "__main__":
     main()
