@@ -1,16 +1,16 @@
 import streamlit as st
-import openai
+from openai import OpenAI
 import time
 
-# 設置 OpenAI API 密鑰
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+# 初始化 OpenAI 客戶端
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # 定義主角和主題選項
 CHARACTER_OPTIONS = ["貓咪", "狗狗", "花花", "小鳥", "小石頭"]
 THEME_OPTIONS = ["親情", "友情", "冒險", "度假", "運動比賽"]
 
 def generate_plot_points(character, theme):
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "你是一個創意的故事策劃者。"},
@@ -20,7 +20,7 @@ def generate_plot_points(character, theme):
         n=1,
         temperature=0.7,
     )
-    plot_points = response.choices[0].message['content'].strip().split("\n")
+    plot_points = response.choices[0].message.content.strip().split("\n")
     return [point.strip() for point in plot_points if point.strip()]
 
 def generate_story(character, theme, plot_point, pages):
@@ -32,7 +32,7 @@ def generate_story(character, theme, plot_point, pages):
     並注意在倒數第三頁加入{plot_point}的元素，
     最後的故事需要是溫馨、快樂的結局。
     """
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "你是一個專業的兒童繪本作家。"},
@@ -42,7 +42,7 @@ def generate_story(character, theme, plot_point, pages):
         n=1,
         temperature=0.7,
     )
-    return response.choices[0].message['content'].strip()
+    return response.choices[0].message.content.strip()
 
 def generate_pages(story, pages, character, theme, plot_point):
     prompt = f"""
@@ -52,7 +52,7 @@ def generate_pages(story, pages, character, theme, plot_point):
 
     {story}
     """
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "你是一個專業的繪本編輯。"},
@@ -62,7 +62,7 @@ def generate_pages(story, pages, character, theme, plot_point):
         n=1,
         temperature=0.7,
     )
-    return response.choices[0].message['content'].strip()
+    return response.choices[0].message.content.strip()
 
 def generate_style_base(story):
     prompt = f"""
@@ -70,7 +70,7 @@ def generate_style_base(story):
 
     {story}
     """
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "你是一個專業的視覺設計師。"},
@@ -80,7 +80,7 @@ def generate_style_base(story):
         n=1,
         temperature=0.7,
     )
-    return response.choices[0].message['content'].strip()
+    return response.choices[0].message.content.strip()
 
 def image_generation(image_prompt, style_base):
     final_prompt = f"""
@@ -95,7 +95,7 @@ def image_generation(image_prompt, style_base):
     """
     
     try:
-        response = openai.Image.create(
+        response = client.images.generate(
             model="dall-e-3",
             prompt=final_prompt,
             n=1,
@@ -103,7 +103,7 @@ def image_generation(image_prompt, style_base):
             quality="standard",
             response_format="url"
         )
-        image_url = response['data'][0]['url']
+        image_url = response.data[0].url
         return image_url
     except Exception as e:
         st.error(f"生成圖片時發生錯誤: {str(e)}")
