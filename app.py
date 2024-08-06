@@ -1,7 +1,6 @@
 import streamlit as st
 from openai import OpenAI
 import time
-import re
 
 # 初始化 OpenAI 客戶端
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -14,19 +13,15 @@ def generate_plot_points(character, theme):
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "你是一個創意的故事策劃者。請直接列出轉折點，不要加入其他說明文字。"},
-            {"role": "user", "content": f"為一個關於{character}的{theme}故事生成3-5個可能的轉折點。每個轉折點都應該簡短且具體。"}
+            {"role": "system", "content": "你是一個創意的故事策劃者。請直接列出5個完整的轉折點，每個轉折點應該是一個完整的句子。"},
+            {"role": "user", "content": f"為一個關於{character}的{theme}故事生成5個可能的轉折點。確保每個轉折點都是完整的想法。"}
         ],
-        max_tokens=150,
+        max_tokens=300,  # 增加 token 數以確保完整輸出
         n=1,
         temperature=0.7,
     )
     content = response.choices[0].message.content.strip()
-    # 使用正則表達式來提取數字列表項
-    plot_points = re.findall(r'\d+\.\s*(.*?)(?=\n\d+\.|\Z)', content, re.DOTALL)
-    # 如果沒有找到數字列表，就按換行符分割
-    if not plot_points:
-        plot_points = content.split('\n')
+    plot_points = content.split('\n')
     return [point.strip() for point in plot_points if point.strip()]
 
 def generate_story(character, theme, plot_point, pages):
@@ -118,47 +113,61 @@ def image_generation(image_prompt, style_base):
 def main():
     st.title("互動式繪本生成器")
 
+    # 使用 session_state 來保存狀態
+    if 'character' not in st.session_state:
+        st.session_state.character = None
+    if 'theme' not in st.session_state:
+        st.session_state.theme = None
+    if 'pages' not in st.session_state:
+        st.session_state.pages = 8
+    if 'plot_points' not in st.session_state:
+        st.session_state.plot_points = None
+    if 'selected_plot_point' not in st.session_state:
+        st.session_state.selected_plot_point = None
+
     # 選擇或輸入繪本主角
-    character = st.selectbox("選擇繪本主角", CHARACTER_OPTIONS + ["自定義"])
+    character = st.selectbox("選擇繪本主角", CHARACTER_OPTIONS + ["自定義"], key='character_select')
     if character == "自定義":
-        character = st.text_input("輸入自定義主角")
+        character = st.text_input("輸入自定義主角", key='character_input')
+    st.session_state.character = character
 
     # 選擇或輸入繪本主題
-    theme = st.selectbox("選擇繪本主題", THEME_OPTIONS + ["自定義"])
+    theme = st.selectbox("選擇繪本主題", THEME_OPTIONS + ["自定義"], key='theme_select')
     if theme == "自定義":
-        theme = st.text_input("輸入自定義主題")
+        theme = st.text_input("輸入自定義主題", key='theme_input')
+    st.session_state.theme = theme
 
     # 選擇頁數
-    pages = st.slider("選擇繪本頁數", 6, 12, 8)
+    st.session_state.pages = st.slider("選擇繪本頁數", 6, 12, st.session_state.pages)
 
-    if st.button("生成故事轉折點"):
+    if st.button("生成故事轉折點") or st.session_state.plot_points is None:
         with st.spinner("正在生成故事轉折點..."):
-            plot_points = generate_plot_points(character, theme)
+            st.session_state.plot_points = generate_plot_points(st.session_state.character, st.session_state.theme)
         
-        if plot_points:
-            st.write("生成的故事轉折點：")
-            for i, point in enumerate(plot_points, 1):
-                st.write(f"{i}. {point}")
-            
-            selected_plot_point = st.selectbox(
-                "選擇故事轉折點",
-                options=plot_points + ["自定義"],
-                format_func=lambda x: x if x != "自定義" else "自定義轉折點"
-            )
-            
-            if selected_plot_point == "自定義":
-                selected_plot_point = st.text_input("輸入自定義故事轉折點")
-        else:
-            st.error("無法生成故事轉折點，請重試。")
-            return
+    if st.session_state.plot_points:
+        st.write("生成的故事轉折點：")
+        for i, point in enumerate(st.session_state.plot_points, 1):
+            st.write(f"{i}. {point}")
+        
+        st.session_state.selected_plot_point = st.selectbox(
+            "選擇故事轉折點",
+            options=st.session_state.plot_points + ["自定義"],
+            index=0 if st.session_state.selected_plot_point is None else st.session_state.plot_points.index(st.session_state.selected_plot_point) if st.session_state.selected_plot_point in st.session_state.plot_points else len(st.session_state.plot_points),
+            format_func=lambda x: x if x != "自定義" else "自定義轉折點",
+            key='plot_point_select'
+        )
+        
+        if st.session_state.selected_plot_point == "自定義":
+            st.session_state.selected_plot_point = st.text_input("輸入自定義故事轉折點", key='custom_plot_point')
 
-        if st.button("生成繪本"):
+    if st.button("生成繪本"):
+        if st.session_state.selected_plot_point:
             with st.spinner("正在生成故事..."):
-                story = generate_story(character, theme, selected_plot_point, pages)
+                story = generate_story(st.session_state.character, st.session_state.theme, st.session_state.selected_plot_point, st.session_state.pages)
                 st.write("故事大綱：")
                 st.write(story)
 
-                pages_content = generate_pages(story, pages, character, theme, selected_plot_point)
+                pages_content = generate_pages(story, st.session_state.pages, st.session_state.character, st.session_state.theme, st.session_state.selected_plot_point)
                 st.write("分頁內容：")
                 st.write(pages_content)
 
@@ -186,6 +195,8 @@ def main():
                             if image_url:
                                 st.image(image_url, caption=f"第 {i+1} 頁插圖")
                         time.sleep(5)  # 添加延遲以避免超過 API 速率限制
+        else:
+            st.warning("請先選擇或輸入一個故事轉折點。")
 
 if __name__ == "__main__":
     main()
