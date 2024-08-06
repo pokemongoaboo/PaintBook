@@ -105,7 +105,7 @@ def main():
                     image = generate_image(prompt, size="1024x1024", model="dall-e-3")
                     if image:
                         st.image(image)
-                    time.sleep(1)  # 為了避免超過API速率限制
+                    time.sleep(3)  # 為了避免超過API速率限制
 
             st.success("繪本生成完成！")
 
